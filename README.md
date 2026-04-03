@@ -91,7 +91,7 @@ Then run normally (text or voice). If the key is not set, it falls back to rule-
 ### Logging
 - Conversation and action results are written to `logs/assistant.log`.
 
-### Technical approach (brief)
+### Technical approach 
 - **Conversation flow**: a small state machine in `src/dialog.py` tracks phase/step and asks for missing fields.
 - **NLU**:
   - Primary: OpenAI (`src/llm_nlu.py`) classifies **book / reschedule / cancel / general / off_topic** and extracts slots (name/date/time).
