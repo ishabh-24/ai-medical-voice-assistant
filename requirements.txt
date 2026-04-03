@@ -1,0 +1,10 @@
+# Core (text mode + TTS; STT without mic works for imports)
+speechrecognition>=3.10.0
+pyttsx3>=2.90
+
+# LLM
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# Microphone input (requires PortAudio; on macOS: brew install portaudio, then pip install pyaudio)
+pyaudio>=0.2.14
