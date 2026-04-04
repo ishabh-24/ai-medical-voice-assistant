@@ -14,41 +14,8 @@ from src.clinic_profile import CLINIC
 from src.conversation_logger import log_turn, setup_logging
 from src.dialog import DialogState, process_turn
 from src.llm_nlu import generate_greeting
+from src.session_exit import wants_quit
 from src.voice_io import listen, speak, voice_available
-
-
-def wants_quit(text: str) -> bool:
-    """true if the user intends to end the session (voice or text)."""
-    t = text.strip().lower()
-    if not t:
-        return False
-    exact = frozenset(
-        {
-            "quit",
-            "exit",
-            "q",
-            "goodbye",
-            "good bye",
-            "bye",
-            "bye bye",
-            "bye-bye",
-            "that's all",
-            "thats all",
-            "that's it",
-            "thats it",
-            "end call",
-            "hang up",
-            "i'm done",
-            "im done",
-            "we're done",
-            "were done",
-        }
-    )
-    if t in exact:
-        return True
-    if t.startswith(("quit ", "exit ", "goodbye ", "bye ")) and len(t) <= 56:
-        return True
-    return False
 
 
 def main() -> None:
@@ -56,7 +23,7 @@ def main() -> None:
     parser.add_argument(
         "--voice",
         action="store_true",
-        help="Use microphone for input and TTS for output (requires PyAudio + network for Google STT).",
+        help="Use microphone for input and TTS for output (requires PyAudio + network for OpenAI Whisper + TTS).",
     )
     parser.add_argument(
         "--no-tts",
@@ -87,8 +54,8 @@ def main() -> None:
 
     if not text_only and not voice_available():
         print(
-            "Note: voice packages not fully available; falling back to text input.\n"
-            "Install requirements.txt and ensure PyAudio works on your system."
+            "Note: voice mode needs OPENAI_API_KEY, openai package, speechrecognition, and PyAudio.\n"
+            "Falling back to text input."
         )
         text_only = True
 

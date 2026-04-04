@@ -1,4 +1,4 @@
-# Core (text mode + TTS; STT without mic works for imports)
+# Mic capture (WAV for Whisper) + offline TTS fallback if no API key
 speechrecognition>=3.10.0
 pyttsx3>=2.90
 

@@ -21,7 +21,8 @@ try:
 except ImportError:
     pass
 
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+# Chat / NLU / general answers (override with OPENAI_MODEL in .env)
+DEFAULT_OPENAI_MODEL = "gpt-5.3"
 
 IntentLabel = Literal["book", "reschedule", "cancel", "general", "off_topic"]
 

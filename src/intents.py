@@ -1,4 +1,4 @@
-"""Intent classification from user utterances (rule-based, no external API)."""
+"""Intent classification from user utterances (rule-based)."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def classify_intent(text: str) -> Intent:
     t = text.strip()
     if not t:
         return Intent.GENERAL
-    # Cancel appointment → same workflow as reschedule (fallback when LLM unavailable)
+    # cancel appointment → same workflow as reschedule (fallback when llm unavailable)
     if re.search(r"\bcancel\b", t, re.I) and re.search(
         r"\b(appointment|visit|booking)\b", t, re.I
     ):
@@ -61,7 +61,7 @@ def extract_name(text: str) -> str | None:
             name = re.split(r"[,.\n]", name)[0].strip()
             if len(name) >= 2:
                 return name.title()
-    # Two capitalized words as fallback
+    # two capitalized words as fallback
     m = re.search(r"\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b", text)
     if m:
         return f"{m.group(1)} {m.group(2)}"

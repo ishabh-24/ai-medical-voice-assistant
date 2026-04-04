@@ -12,6 +12,7 @@ from enum import Enum
 
 from .date_parse import looks_like_correction, parse_date_phrase, parse_time_phrase
 from .intents import Intent, classify_intent, extract_name, is_unclear
+from .clinic_hours import booking_hours_violation_message
 from .clinic_profile import CLINIC
 from .llm_nlu import (
     answer_general_question,
@@ -220,6 +221,32 @@ def _parse_cancel_offer_choice(text: str, *, first_turn: bool) -> str:
     return "unknown"
 
 
+def _apply_local_booking_datetime(text: str, state: DialogState, action_log: dict) -> None:
+    """
+    Prefer regex date/time parse over LLM slots when the utterance contains them.
+    Fixes stale or wrong dates (e.g. user says 'Saturday' but NLU keeps 'tomorrow').
+    """
+    ld = parse_date_phrase(text)
+    lt = parse_time_phrase(text)
+    if ld:
+        state.date = ld
+        action_log["local_date_parse"] = ld
+    if lt:
+        state.time = lt
+        action_log["local_time_parse"] = lt
+
+
+def _book_hours_gate(state: DialogState, action_log: dict) -> TurnResult | None:
+    """If proposed time is outside clinic hours, ask for another time."""
+    msg = booking_hours_violation_message(state.date or "", state.time or "")
+    if not msg:
+        return None
+    state.time = None
+    state.book_step = BookStep.TIME
+    action_log["outside_clinic_hours"] = True
+    return TurnResult(reply=msg, action_log=action_log)
+
+
 def _try_cancel_offer_turn(
     state: DialogState, text: str, action_log: dict, *, first_turn: bool
 ) -> TurnResult | None:
@@ -356,14 +383,23 @@ def process_turn(state: DialogState, user_text: str) -> TurnResult:
 
         if nlu.patient_name:
             state.patient_name = nlu.patient_name
-        if nlu.date:
-            state.date = nlu.date
-        if nlu.time:
-            state.time = nlu.time
-        if nlu.old_date:
-            state.old_date = nlu.old_date
-        if nlu.new_date:
-            state.new_date = nlu.new_date
+        # Avoid polluting booking slots with reschedule fields when the LLM misclassifies.
+        if state.phase in (Phase.ROUTE, Phase.BOOK):
+            if nlu.date:
+                state.date = nlu.date
+            if nlu.time:
+                state.time = nlu.time
+        elif state.phase == Phase.RESCHEDULE:
+            if nlu.old_date:
+                state.old_date = nlu.old_date
+            if nlu.new_date:
+                state.new_date = nlu.new_date
+        elif state.phase == Phase.CANCEL:
+            if nlu.old_date:
+                state.old_date = nlu.old_date
+
+    if state.phase in (Phase.ROUTE, Phase.BOOK):
+        _apply_local_booking_datetime(text, state, action_log)
 
     if state.phase == Phase.ROUTE:
         intent = _resolve_intent(text, nlu)
@@ -514,6 +550,9 @@ def _book_flow(
             if tm:
                 state.time = tm
         if state.patient_name and state.date and state.time:
+            gate = _book_hours_gate(state, action_log)
+            if gate:
+                return gate
             state.book_step = BookStep.CONFIRM
             return _book_confirm(state, action_log)
         if state.patient_name and state.date:
@@ -550,6 +589,11 @@ def _book_flow(
                 state.patient_name = n
         if state.book_step == BookStep.NAME and n:
             state.patient_name = n
+        if state.book_step == BookStep.CONFIRM and (d or tm):
+            gate = _book_hours_gate(state, action_log)
+            if gate:
+                return gate
+            return _book_confirm(state, action_log)
         if state.book_step == BookStep.TIME:
             if d and not tm:
                 return TurnResult(
@@ -558,10 +602,17 @@ def _book_flow(
                 )
             if d and tm:
                 state.time = tm
+                state.date = d
+                gate = _book_hours_gate(state, action_log)
+                if gate:
+                    return gate
                 state.book_step = BookStep.CONFIRM
                 return _book_confirm(state, action_log)
             if not d and tm:
                 state.time = tm
+                gate = _book_hours_gate(state, action_log)
+                if gate:
+                    return gate
                 state.book_step = BookStep.CONFIRM
                 return _book_confirm(state, action_log)
 
@@ -573,6 +624,25 @@ def _book_flow(
                 action_log=action_log,
             )
         state.patient_name = n.strip().title() if " " in n else n
+        d = state.date or parse_date_phrase(text)
+        tm = state.time or parse_time_phrase(text)
+        if d:
+            state.date = d
+        if d and tm:
+            bad = booking_hours_violation_message(state.date or "", tm)
+            if bad:
+                state.time = None
+                state.book_step = BookStep.TIME
+                return TurnResult(reply=bad, action_log=action_log)
+            state.time = tm
+            state.book_step = BookStep.CONFIRM
+            return _book_confirm(state, action_log)
+        if d:
+            state.book_step = BookStep.TIME
+            return TurnResult(
+                reply=f"Got it — {state.date}. What time would you prefer?",
+                action_log=action_log,
+            )
         state.book_step = BookStep.DATE
         return TurnResult(
             reply=f"Thank you, {state.patient_name}. What date works for you?",
@@ -587,6 +657,16 @@ def _book_flow(
                 action_log=action_log,
             )
         state.date = d
+        tm = state.time or parse_time_phrase(text)
+        if tm:
+            bad = booking_hours_violation_message(state.date or "", tm)
+            if bad:
+                state.time = None
+                state.book_step = BookStep.TIME
+                return TurnResult(reply=bad, action_log=action_log)
+            state.time = tm
+            state.book_step = BookStep.CONFIRM
+            return _book_confirm(state, action_log)
         state.book_step = BookStep.TIME
         return TurnResult(
             reply=f"Got it — {d}. What time would you prefer?",
@@ -594,12 +674,23 @@ def _book_flow(
         )
 
     if state.book_step == BookStep.TIME:
+        # apply any new day from this utterance first
+        d_new = parse_date_phrase(text)
+        if d_new:
+            state.date = d_new
         tm = state.time or parse_time_phrase(text)
         if not tm:
-            return TurnResult(
-                reply="What time should I book? For example, 10:30 AM or afternoon.",
-                action_log=action_log,
-            )
+            if state.date:
+                reply = (
+                    f"What time on {state.date} works best? "
+                    "For example, 10:30 AM or afternoon."
+                )
+            else:
+                reply = "What time should I book? For example, 10:30 AM or afternoon."
+            return TurnResult(reply=reply, action_log=action_log)
+        bad = booking_hours_violation_message(state.date or "", tm)
+        if bad:
+            return TurnResult(reply=bad, action_log=action_log)
         state.time = tm
         state.book_step = BookStep.CONFIRM
         return _book_confirm(state, action_log)
@@ -623,6 +714,9 @@ def _book_flow(
                 state.date = d
             if tm:
                 state.time = tm
+            gate = _book_hours_gate(state, action_log)
+            if gate:
+                return gate
             return _book_confirm(state, action_log)
         return TurnResult(
             reply="Please say yes to confirm the appointment, or no to cancel.",

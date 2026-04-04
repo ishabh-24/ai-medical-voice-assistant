@@ -4,19 +4,23 @@ Prototype voice assistant that simulates handling patient phone calls for a medi
 It supports booking, rescheduling, and general questions.
 
 ### Features 
-- **Voice interaction**: microphone input (optional) + text-to-speech output; **text fallback** always available
-- **Basic intents**: book appointment, reschedule appointment, general question (fallback)
+- **Voice interaction**: mic → **Whisper** STT, dialog + NLU → **OpenAI chat** (`OPENAI_MODEL`, default `gpt-5.3`), reply → **OpenAI TTS** (`tts-1`); **text mode** always available
+- **Intents** (NLU): **book**, **reschedule**, **cancel**, **general**, **off_topic**; routing also uses lightweight rules when the API is unavailable
 - **Multi-step flow**: asks for missing info (name/date/time), confirms before completing
 - **Corrections**: handles changes like “actually, next Monday”
-- **Simulated actions**: prints/logs a final `book_appointment` or `reschedule_appointment` result
+- **Simulated actions**: prints/logs a final `book_appointment`, `reschedule_appointment`, or `cancel_appointment` result
 - **Logging**: writes conversation turns to `logs/assistant.log`
-- **Non-hardcoded NLU**: uses **OpenAI API** for intent + slot extraction when configured, with rule-based fallback
+- **NLU + rules**: OpenAI JSON extraction when `OPENAI_API_KEY` is set; **regex / `date_parse`** always applied on top of model output for reliable date/time (and **clinic-hours checks** in `clinic_hours.py` for booking times)
 
 ### Project structure
 - `src/main.py`: CLI entrypoint (text / voice modes)
-- `src/dialog.py`: conversation state machine (booking + rescheduling)
-- `src/llm_nlu.py`: OpenAI-powered intent + slot extraction + general Q&A (optional)
-- `src/voice_io.py`: speech input (optional) and text-to-speech output
+- `src/dialog.py`: conversation state machine (booking, reschedule, cancel)
+- `src/llm_nlu.py`: OpenAI intent + slot extraction + greeting + general/off-topic replies (optional without API key)
+- `src/date_parse.py`: deterministic date/time parsing (used with / without the LLM)
+- `src/clinic_hours.py`: office-hours validation for proposed appointment times
+- `src/session_exit.py`: voice/text phrases to end the session
+- `src/clinic_profile.py`: clinic facts for grounded answers
+- `src/voice_io.py`: Whisper mic capture + OpenAI TTS (with offline fallbacks if needed)
 - `src/conversation_logger.py`: file logging
 
 ### Prerequisites
@@ -41,22 +45,27 @@ Type `quit`, `exit`, `goodbye`, etc. to end (or press `Ctrl+C`).
 
 ### Run (voice mode)
 
-1. Install microphone dependencies (macOS example):
+1. Install microphone capture (macOS example):
 
 ```bash
 brew install portaudio
 pip install pyaudio
 ```
 
-2. Run:
+2. Set `OPENAI_API_KEY` in `.env`. Voice mode uses:
+   - **Whisper** (`OPENAI_STT_MODEL`, default `whisper-1`) to transcribe the mic
+   - **GPT-5.3** (`OPENAI_MODEL`, default `gpt-5.3`) for assistant logic and replies
+   - **TTS** (`OPENAI_TTS_MODEL`, default `tts-1`) to speak replies; override `OPENAI_TTS_VOICE` if needed
+
+3. Run:
 
 ```bash
 python src/main.py --voice
 ```
 
 Notes:
-- Speech recognition uses Google STT via `speech_recognition`, so network access is required.
-- Use `--no-tts` to disable text-to-speech in voice mode:
+- Playback on macOS uses `afplay` for MP3 from OpenAI TTS.
+- Use `--no-tts` to print replies only (still uses Whisper for input):
 
 ```bash
 python src/main.py --voice --no-tts
@@ -81,12 +90,14 @@ Alternatively, export in the terminal:
 
 ```bash
 export OPENAI_API_KEY="YOUR_KEY"
-export OPENAI_MODEL="gpt-4o-mini"   # optional
+export OPENAI_MODEL="gpt-5.3"   # must match an ID your key can use
+export OPENAI_STT_MODEL="whisper-1"
+export OPENAI_TTS_MODEL="tts-1"
 ```
 
 Then run normally (text or voice). If the key is not set, it falls back to rule-based parsing.
 
-**Default model (cost):** `gpt-4o-mini` is used as the default (`OPENAI_MODEL` in `src/llm_nlu.py`). It is a small, cost-effective model that works for JSON extraction and short replies, but a better model would allow for quicker replies.
+**Models:** Defaults are **`gpt-5.3`** for chat/NLU, **`whisper-1`** for mic transcription, and **`tts-1`** for spoken replies (see `src/llm_nlu.py` and `src/voice_io.py`).
 
 ### Logging
 - Conversation and action results are written to `logs/assistant.log`.
@@ -94,12 +105,13 @@ Then run normally (text or voice). If the key is not set, it falls back to rule-
 ### Technical approach 
 - **Conversation flow**: a small state machine in `src/dialog.py` tracks phase/step and asks for missing fields.
 - **NLU**:
-  - Primary: OpenAI (`src/llm_nlu.py`) classifies **book / reschedule / cancel / general / off_topic** and extracts slots (name/date/time).
+  - Primary: OpenAI (`src/llm_nlu.py`) classifies **book / reschedule / cancel / general / off_topic** and extracts slots (name/date/time, plus old/new dates for reschedule when relevant).
+  - Slot fields from the model are **scoped by phase** (e.g. reschedule `old_date`/`new_date` are not merged during booking) and **merged with deterministic parsing** from the same user text so one utterance can fill date/time reliably.
   - **Cancel**: asks once whether the caller wants **reschedule** or **cancel entirely**; reschedule enters the reschedule flow; cancel-only collects details and simulates **`cancel_appointment`**.
   - **Yes/no** on confirm steps is handled **before** NLU so short answers like “no” are not misclassified.
   - **Off-topic** requests get a short reply directing them to the **front desk phone** from the clinic profile.
-  - **Greeting**: one short line via OpenAI (fallback if no API key).
-  - **Fallback**: lightweight regex/date parsing when OpenAI is not configured.
-- **Clinic grounding**: a small simulated clinic profile in `src/clinic_profile.py` (address/hours/phone) is used to answer general questions (LLM + offline fallback).
+  - **Greeting**: one short line via OpenAI (static fallback if no API key).
+  - **Without OpenAI**: rule-based intent from `src/intents.py` and regex/date parsing only; no LLM slots.
+- **Clinic grounding**: `src/clinic_profile.py` (address/hours/phone) for general questions; **`clinic_hours.py`** enforces bookable times against those hours.
 - **Safety/robustness**: handles silence/unclear audio, confirmation steps before “finalizing” actions, and logs every turn.
 

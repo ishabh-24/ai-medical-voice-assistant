@@ -1,4 +1,4 @@
-"""Lightweight date/time extraction from natural language (demo-friendly)."""
+"""Date/time extraction from natural language."""
 
 from __future__ import annotations
 
@@ -103,8 +103,11 @@ def parse_date_phrase(text: str, *, today: date | None = None) -> str | None:
 
 
 def parse_time_phrase(text: str) -> str | None:
-    """Return e.g. '10:00 AM' or None."""
+    """Return 24-hour 'HH:MM' or None."""
     t = text.lower()
+    # STT often writes "a.m." / "p.m." — normalize so am/pm regexes match
+    t = re.sub(r"\b([ap])\.m\.", r"\1m", t)
+
     m = re.search(r"\b(\d{1,2}):(\d{2})\s*(am|pm)?\b", t)
     if m:
         h, mi = int(m.group(1)), int(m.group(2))
@@ -115,7 +118,19 @@ def parse_time_phrase(text: str) -> str | None:
             h = 0
         return f"{h % 24:02d}:{mi:02d}"
 
-    m = re.search(r"\b(\d{1,2})\s*(am|pm)\b", t)
+    # "6 30 pm" / "6 30 p.m." (after a.m./p.m. normalization)
+    m = re.search(r"\b(\d{1,2})\s+(\d{2})\s*(am|pm)\b", t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+        ap = m.group(3)
+        if ap == "pm" and h != 12:
+            h += 12
+        if ap == "am" and h == 12:
+            h = 0
+        return f"{h % 24:02d}:{mi:02d}"
+
+    # Hour only 1–12 with am/pm (avoid matching "30 pm" in "6 30 pm")
+    m = re.search(r"\b(1[0-2]|[1-9])\s*(am|pm)\b", t)
     if m:
         h = int(m.group(1))
         if m.group(2) == "pm" and h != 12:
@@ -123,6 +138,21 @@ def parse_time_phrase(text: str) -> str | None:
         if m.group(2) == "am" and h == 12:
             h = 0
         return f"{h % 24:02d}:00"
+
+    # "Saturday at 10" / "at 7" with no am/pm (common in speech)
+    if not re.search(r"\b(am|pm)\b", t):
+        m = re.search(r"\bat\s+(\d{1,2})\b", t)
+        if m:
+            h = int(m.group(1))
+            if 1 <= h <= 7:
+                h24 = h + 12
+            elif 8 <= h <= 11:
+                h24 = h
+            elif h == 12:
+                h24 = 12
+            else:
+                h24 = h % 24
+            return f"{h24 % 24:02d}:00"
 
     if "morning" in t:
         return "09:00"
