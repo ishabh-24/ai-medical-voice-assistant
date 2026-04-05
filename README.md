@@ -25,15 +25,33 @@ It supports booking, rescheduling, and general questions.
 
 ### Prerequisites
 - Python **3.10+**
+- **Git** (to clone this repository)
 
-### Setup
+### Getting started
+
+1. **Clone the repository** and enter the project directory:
 
 ```bash
-cd /Users/ishabhatia/Desktop/sena-technical
+git clone https://github.com/ishabh-24/ai-medical-voice-assistant.git
+cd ai-medical-voice-assistant
+```
+
+2. **Create a virtual environment** and install dependencies:
+
+```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+3. **Configure the environment** (recommended if you use OpenAI for NLU, STT, or TTS). Copy the example file and add your API key:
+
+```bash
+cp .env.example .env
+# Edit `.env` and set OPENAI_API_KEY=sk-...
+```
+
+See [Enable OpenAI](#enable-openai) below for optional variables (`OPENAI_MODEL`, voice mode, etc.). The app still runs in a reduced rule-based mode without a key.
 
 ### Run (text mode)
 
