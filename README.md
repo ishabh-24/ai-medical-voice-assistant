@@ -23,9 +23,6 @@ It supports booking, rescheduling, and general questions.
 - `src/voice_io.py`: Whisper mic capture + OpenAI TTS (with offline fallbacks if needed)
 - `src/conversation_logger.py`: file logging
 
-### Prerequisites
-- Python **3.10+**
-
 ### Getting started
 
 1. **Clone the repository** and enter the project directory:
