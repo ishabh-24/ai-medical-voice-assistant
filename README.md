@@ -25,7 +25,6 @@ It supports booking, rescheduling, and general questions.
 
 ### Prerequisites
 - Python **3.10+**
-- **Git** (to clone this repository)
 
 ### Getting started
 
